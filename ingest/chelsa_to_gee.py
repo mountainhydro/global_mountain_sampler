@@ -45,6 +45,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from collections import Counter
 from pathlib import Path
 
 import boto3
@@ -55,16 +56,18 @@ from botocore import UNSIGNED
 from botocore.config import Config
 
 # ── Configuration ──────────────────────────────────────────────────────────────
+# These values are used as defaults; override on the command line with
+# --project, --gcs-bucket, and --gee-base.
 
 S3_ENDPOINT  = "https://os.unil.cloud.switch.ch"
 S3_BUCKET    = "chelsa02"
 S3_PREFIX    = "chelsa/global/climatologies/"
 
-GCS_BUCKET   = "chelsa"                            # change to your GCS bucket
+GCS_BUCKET   = ""                              # set with --gcs-bucket
 GCS_PREFIX   = "chelsa/climatologies"
 
-GEE_PROJECT  = "promising-era-496715-j5"
-GEE_BASE     = f"projects/{GEE_PROJECT}/assets/chelsa_climatologies"
+GEE_PROJECT  = ""                              # set with --project
+GEE_BASE     = ""                              # derived from GEE_PROJECT, or set with --gee-base
 
 # Parallel workers for download + upload
 N_WORKERS    = 4
@@ -135,7 +138,6 @@ def _gcs_client():
     credentials = ee.data.get_persistent_credentials()
     return gcs_lib.Client(project=GEE_PROJECT, credentials=credentials)
 
-
 def _gcs_blob(uri: str):
     """Return a GCS Blob object for the given gs:// URI."""
     path = uri[len(f"gs://{GCS_BUCKET}/"):]
@@ -154,7 +156,6 @@ def upload_to_gcs(local_path: str, uri: str) -> None:
 
 def init_ee():
     ee.Initialize(project=GEE_PROJECT)
-
 
 def gee_asset_id(obj: dict) -> str:
     # GEE asset IDs may not contain dots, so "V.2.1" -> "V21".
@@ -244,6 +245,13 @@ def main():
     parser = argparse.ArgumentParser(
         description="Ingest CHELSA climatologies from S3 into GEE via GCS"
     )
+    parser.add_argument("--project",    required=True, metavar="PROJECT_ID",
+                        help="GEE / GCP project ID (e.g. my-project-123)")
+    parser.add_argument("--gcs-bucket", required=True, metavar="BUCKET",
+                        help="GCS bucket name used as staging area (e.g. my-chelsa-bucket)")
+    parser.add_argument("--gee-base",   default=None, metavar="ASSET_PATH",
+                        help="Root GEE asset folder path "
+                             "(default: projects/<PROJECT_ID>/assets/chelsa_climatologies)")
     parser.add_argument("--dry-run",    action="store_true",
                         help="List files only — no download, no upload")
     parser.add_argument("--all",        action="store_true",
@@ -264,6 +272,13 @@ def main():
                         help="Skip the confirmation prompt (for non-interactive runs)")
     args = parser.parse_args()
 
+    # Apply project / bucket / base-path to module-level config so all helpers
+    # pick them up (they read the globals at call time).
+    global GEE_PROJECT, GCS_BUCKET, GEE_BASE
+    GEE_PROJECT = args.project
+    GCS_BUCKET  = args.gcs_bucket
+    GEE_BASE    = args.gee_base or f"projects/{GEE_PROJECT}/assets/chelsa_climatologies"
+
     period_filter = None if args.period == "all" else args.period
     vars_filter   = [] if args.all else (args.vars or DEFAULT_VARS)
 
@@ -278,7 +293,6 @@ def main():
     print(f"\nFound {len(tifs)} TIF files  ({total_mb/1024:.1f} GB total)")
 
     # Summary by variable
-    from collections import Counter
     by_var = Counter(t["var"] for t in tifs)
     for v, n in sorted(by_var.items()):
         print(f"  {v:20s}  {n:4d} files")

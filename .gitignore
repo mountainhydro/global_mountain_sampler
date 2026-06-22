@@ -20,6 +20,9 @@
 # ── Superseded earlier pipeline (not tracked) ──────────────────────────────
 alternatives/
 
+# ── Logs ──────────────────────────────────────────────────────────────────
+*.log
+
 # ── Python / Jupyter ───────────────────────────────────────────────────────
 __pycache__/
 .ipynb_checkpoints/

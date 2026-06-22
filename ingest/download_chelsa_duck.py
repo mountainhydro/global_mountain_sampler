@@ -15,8 +15,8 @@ Usage
     # List what is available (no download)
     python download_chelsa_duck.py "C:/.../envicloud.duck" --dry-run
 
-    # Download everything under the bookmark's path into ./chelsa_download
-    python download_chelsa_duck.py "C:/.../envicloud.duck" -o ./chelsa_download
+    # Download everything under the bookmark's path into ./CHELSA_download
+    python download_chelsa_duck.py "C:/.../envicloud.duck" -o ./CHELSA_download
 
     # Only the bio variables for the 1981-2010 period, 8 parallel workers
     python download_chelsa_duck.py "C:/.../envicloud.duck" -o ./out \
@@ -177,16 +177,13 @@ def human_gb(n_bytes: int) -> str:
     return f"{n_bytes / 1024**3:.2f} GB"
 
 
-# Used when the script is launched with no `duck` argument (e.g. the IDE run button).
-DEFAULT_DUCK = r"C:\Users\stefan\Projects\MountAInWater\Climate data\envicloud.duck"
-
-
 def main() -> int:
     p = argparse.ArgumentParser(description="Download a dataset from a Cyberduck .duck S3 bookmark")
-    p.add_argument("duck", nargs="?", default=DEFAULT_DUCK,
-                   help=f"Path to the .duck bookmark file (default: {DEFAULT_DUCK})")
-    p.add_argument("-o", "--out", default="./chelsa_download",
-                   help="Output directory (default: ./chelsa_download)")
+    p.add_argument("duck",
+                   help="Path to the .duck bookmark file (.duck files are created by "
+                        "Cyberduck / Mountain Duck and describe an S3 connection)")
+    p.add_argument("-o", "--out", default="./CHELSA_download",
+                   help="Output directory (default: ./CHELSA_download)")
     p.add_argument("--vars", nargs="+", default=[], metavar="VAR",
                    help="Only download these variable folders, exact match "
                         "(e.g. --vars tas pr). Default: all variables. "

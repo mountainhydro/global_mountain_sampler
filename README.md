@@ -26,6 +26,8 @@ breadth of global mountain environments.
 | `notebooks/global_sampling.ipynb` | Stratified GEE sampling (50k) → k-means medoid reduction (1000) → GEE assets |
 | `notebooks/global_climate_space.ipynb` | Annual CHELSA climate → climate-space density plots + interactive explorer → image/polygon assets for the app |
 | `gee/global_sample_app.js` | Earth Engine App: global map of the 1000 medoids + GMBA regions + supersite basins, with on-the-fly climate-space density plots |
+| `ingest/download_chelsa_duck.py` | Download CHELSA v2.1 GeoTIFFs from SWITCH ScienceCloud S3 to a local directory |
+| `ingest/chelsa_to_gee.py` | Upload local CHELSA TIFs to GCS and ingest them as GEE Image assets |
 
 ## Method
 
@@ -64,7 +66,7 @@ datasets need no setup; the others must exist in your project before running.
 | `GOOGLE/SATELLITE_EMBEDDING/V1/ANNUAL` (AlphaEarth) | `global_sampling` | Public GEE catalog — no setup |
 | `USGS/GMTED2010` (global DEM, Kapos classes) | `global_sampling` | Public GEE catalog — no setup |
 | `…/assets/GMBA_Inventory_standard_300` (mountain regions) | both notebooks + app | **Project asset** — ingest `GMBA_Inventory_v2.0_standard_300/*.shp` as a FeatureCollection table |
-| `…/assets/chelsa_climatologies/1981-2010/<var>/CHELSA_<var>_<MM>_1981-2010_V21` | `global_climate_space` | **Project assets** — 132 monthly CHELSA v2.1 rasters (11 variables × 12 months) ingested as images |
+| `…/assets/chelsa_climatologies/1981-2010/<var>/CHELSA_<var>_<MM>_1981-2010_V21` | `global_climate_space` | **Project assets** — 132 monthly CHELSA v2.1 rasters (11 variables × 12 months) ingested as images; use `ingest/download_chelsa_duck.py` + `ingest/chelsa_to_gee.py` (see *Ingesting CHELSA into GEE* below) |
 | Supersite basin shapefiles (`Supersites/.../*.shp`) | `global_climate_space` §5 | **Local files** — paths set in the `SUPERSITES` config |
 
 Within the pipeline, `global_climate_space` and the app also consume assets that
@@ -97,6 +99,92 @@ monthly CHELSA climatologies are pre-existing assets in the same project.)
 4. **`gee/global_sample_app.js`** — paste into the [EE Code Editor](https://code.earthengine.google.com)
    and run. To publish: the app's assets must be readable by viewers
    (`earthengine acl set public <asset>` for each, or grant the relevant readers).
+
+## Ingesting CHELSA into GEE
+
+The `ingest/` folder contains two standalone scripts for bringing the CHELSA v2.1
+climatologies into a GEE project. Run them **once**, before `global_climate_space.ipynb`.
+
+### 1 — Download CHELSA locally (`ingest/download_chelsa_duck.py`)
+
+Downloads CHELSA GeoTIFFs from the SWITCH ScienceCloud S3 store to a local
+directory. The script reads a [Cyberduck](https://cyberduck.io/) `.duck` bookmark
+file to locate the bucket, so you need to create one first (see below).
+
+**Create a `.duck` bookmark:**
+Open Cyberduck → *Open Connection* → choose **S3 (Amazon S3)**, set:
+- Server: `os.unil.cloud.switch.ch`
+- Path: `/chelsa02/chelsa/global/climatologies/`
+- Access key ID / Secret: leave blank (anonymous)
+
+Save it as a `.duck` file (drag the connection to the desktop, or *Bookmark → New
+Bookmark*).
+
+```bash
+# Dry-run — list what would be downloaded (no files transferred)
+python ingest/download_chelsa_duck.py path/to/envicloud.duck --dry-run
+
+# Download the 11-variable 1981-2010 climatologies (~15 GB) to ./ingest/CHELSA_download
+python ingest/download_chelsa_duck.py path/to/envicloud.duck \
+    -o ./ingest/CHELSA_download \
+    --vars clt cmi hurs pet pr rsds sfcWind tas tasmax tasmin vpd \
+    --period 1981-2010
+
+# Smoke-test: grab just the first 3 files
+python ingest/download_chelsa_duck.py path/to/envicloud.duck --limit 3 -o ./ingest/CHELSA_download
+```
+
+Available variables: `clt cmi hurs pet pr rsds sfcWind tas tasmax tasmin vpd`
+(and `bio` bioclimatic indices if you need them).
+
+### 2 — Upload to GCS and ingest into GEE (`ingest/chelsa_to_gee.py`)
+
+Streams each TIF from the CHELSA S3 bucket to a GCS staging bucket, then submits
+a GEE ingest task. Requires a GCS bucket you own and a GEE project with asset
+write access.
+
+**Authentication** (one-time):
+```bash
+earthengine authenticate          # GEE
+gcloud auth application-default login   # GCS (or let the script reuse EE credentials)
+```
+
+```bash
+# Dry-run — list what would be ingested
+python ingest/chelsa_to_gee.py \
+    --project  my-gcp-project-id \
+    --gcs-bucket  my-chelsa-staging-bucket \
+    --dry-run
+
+# Ingest all 11 variables for 1981-2010 (the pipeline default)
+python ingest/chelsa_to_gee.py \
+    --project  my-gcp-project-id \
+    --gcs-bucket  my-chelsa-staging-bucket \
+    --period 1981-2010
+
+# Custom GEE asset root (default: projects/<PROJECT>/assets/chelsa_climatologies)
+python ingest/chelsa_to_gee.py \
+    --project  my-gcp-project-id \
+    --gcs-bucket  my-chelsa-staging-bucket \
+    --gee-base projects/my-gcp-project-id/assets/my_chelsa_folder \
+    --period 1981-2010
+
+# Skip the GCS upload if files are already staged
+python ingest/chelsa_to_gee.py \
+    --project  my-gcp-project-id \
+    --gcs-bucket  my-chelsa-staging-bucket \
+    --skip-gcs
+
+# Non-interactive (CI / batch)
+python ingest/chelsa_to_gee.py \
+    --project  my-gcp-project-id \
+    --gcs-bucket  my-chelsa-staging-bucket \
+    --yes
+```
+
+GEE assets land under `projects/<PROJECT>/assets/chelsa_climatologies/<period>/<var>/`
+with one Image per monthly TIF, named after the CHELSA filename stem (dots stripped).
+The `global_climate_space.ipynb` notebook expects this exact path structure.
 
 ## Repository layout
 
