@@ -1,0 +1,25 @@
+# ── Datasets (kept locally / in GEE / GCS, not tracked in git) ──────────────
+*.csv
+*.geojson
+*.gpkg
+*.tif
+*.tiff
+*.png
+*.html
+
+# Shapefiles (all sidecar files)
+*.shp
+*.shx
+*.dbf
+*.prj
+*.cpg
+*.sbn
+*.sbx
+*.shp.xml
+
+# ── Superseded earlier pipeline (not tracked) ──────────────────────────────
+alternatives/
+
+# ── Python / Jupyter ───────────────────────────────────────────────────────
+__pycache__/
+.ipynb_checkpoints/

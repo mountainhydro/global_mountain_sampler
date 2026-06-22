@@ -1,0 +1,16 @@
+# Global Mountain Sampler — Python dependencies (conda env "gee")
+# Covers notebooks/global_sampling.ipynb and notebooks/global_climate_space.ipynb.
+
+earthengine-api>=0.1.370     # Earth Engine Python API
+geemap>=0.30                 # interactive maps in the notebooks
+numpy>=1.24
+pandas>=2.0
+scikit-learn>=1.4            # k-means medoid reduction (global_sampling)
+scipy>=1.11                  # KDE + convex hull for supersite climate hulls
+matplotlib>=3.7              # static plot rendering
+plotly>=5.18                 # interactive climate-space explorer (HTML)
+geopandas>=0.14              # read supersite shapefiles
+shapely>=2.0                 # geometry ops (geopandas dependency)
+pyogrio>=0.7                 # fast vector I/O for geopandas
+rasterio>=1.3                # write Cloud-Optimized GeoTIFFs of the plots
+google-cloud-storage>=2.10   # stage plot GeoTIFFs in GCS before ingestion
