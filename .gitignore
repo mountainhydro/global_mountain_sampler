@@ -29,3 +29,7 @@ __pycache__/
 
 # ── Editor ─────────────────────────────────────────────────────────────────
 .vscode/
+
+# ── Local scratch / test scripts (not tracked) ─────────────────────────────
+test_*.py
+scratch_*.py

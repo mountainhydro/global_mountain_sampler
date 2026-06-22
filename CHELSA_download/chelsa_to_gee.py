@@ -1,41 +1,62 @@
 """
 CHELSA Climatologies → Google Cloud Storage → GEE ImageCollection
 
-Source  : S3-compatible object store at os.zhdk.cloud.switch.ch
+Source  : S3-compatible object store at os.unil.cloud.switch.ch (anonymous)
 Bucket  : chelsa02
 Prefix  : chelsa/global/climatologies/
-Access  : anonymous
 
 Workflow
 --------
 1. List all GeoTIFFs in the S3 bucket (optionally filtered by period / variable)
-2. Download each TIF to a local temp dir (or stream to GCS via pipe)
-3. Upload to GCS
-4. Ingest into GEE as individual Image assets, collecting all into one
-   ImageCollection per variable group (bio, pr, tas, …)
+2. Download each TIF to a local temp dir
+3. Upload to a GCS bucket (created automatically if it does not exist)
+4. Ingest into GEE as individual Image assets, organised into one
+   ImageCollection per variable (bio, pr, tas, …)
 
-Requirements
-------------
-    pip install boto3 google-cloud-storage earthengine-api
+Setup (one-time)
+----------------
+1.  Install Python dependencies::
 
-Authentication
---------------
-    earthengine authenticate          # one-time, for GEE
-    gcloud auth application-default login   # for GCS uploads
+        pip install boto3 google-cloud-storage earthengine-api
+
+2.  Create a Google Cloud project (if you do not have one):
+    https://console.cloud.google.com/projectcreate
+    Enable the **Earth Engine API** and **Cloud Storage API** for the project.
+
+3.  Authenticate with Google::
+
+        # For GCS uploads:
+        gcloud auth application-default login
+
+        # For GEE ingestion (one-time per machine):
+        earthengine authenticate
+
+    If you do not have the gcloud CLI yet:
+    https://cloud.google.com/sdk/docs/install
+
+4.  Register your GCP project with Earth Engine (free for research):
+    https://signup.earthengine.google.com/
+
+5.  (Optional) Create a GCS bucket yourself, or let this script create one
+    automatically with ``--create-bucket``.  Bucket names must be globally
+    unique.  A safe pattern: ``<your-project-id>-chelsa``.
 
 Usage
 -----
-    # Dry-run — just list what would be downloaded
-    python chelsa_to_gee.py --dry-run
+    # Dry-run — list what would be uploaded, create nothing
+    python chelsa_to_gee.py --project my-project-123 --gcs-bucket my-chelsa --dry-run
 
-    # Download bio1–bio19 for both periods
-    python chelsa_to_gee.py --vars bio
+    # First run: auto-create the GCS bucket, then upload tas + pr
+    python chelsa_to_gee.py --project my-project-123 --gcs-bucket my-chelsa \\
+        --create-bucket --vars tas pr --period 1981-2010
 
-    # Full climatologies for 1981-2010 only
-    python chelsa_to_gee.py --period 1981-2010
+    # Skip GEE ingest (upload to GCS only)
+    python chelsa_to_gee.py --project my-project-123 --gcs-bucket my-chelsa \\
+        --vars bio --skip-gee
 
-    # Everything (warning: ~150 GB+)
-    python chelsa_to_gee.py --all
+    # Full climatologies for 1981-2010 (warning: ~150 GB+)
+    python chelsa_to_gee.py --project my-project-123 --gcs-bucket my-chelsa \\
+        --period 1981-2010 --all
 """
 
 import argparse
@@ -137,6 +158,26 @@ def _gcs_client():
     """GCS client reusing the earthengine credentials (avoids needing gcloud ADC)."""
     credentials = ee.data.get_persistent_credentials()
     return gcs_lib.Client(project=GEE_PROJECT, credentials=credentials)
+
+
+def ensure_gcs_bucket(location: str = "US") -> None:
+    """Create the GCS bucket if it does not already exist.
+
+    Parameters
+    ----------
+    location:
+        GCS multi-region or region, e.g. ``"US"``, ``"EU"``, ``"us-central1"``.
+        Defaults to ``"US"`` (multi-region, no egress charges within GCP).
+    """
+    client = _gcs_client()
+    bucket = client.bucket(GCS_BUCKET)
+    if bucket.exists():
+        print(f"GCS bucket gs://{GCS_BUCKET} already exists — skipping creation.")
+        return
+    print(f"Creating GCS bucket gs://{GCS_BUCKET} in {location} …")
+    new_bucket = client.create_bucket(GCS_BUCKET, location=location)
+    print(f"  Created: gs://{new_bucket.name}")
+
 
 def _gcs_blob(uri: str):
     """Return a GCS Blob object for the given gs:// URI."""
@@ -248,7 +289,16 @@ def main():
     parser.add_argument("--project",    required=True, metavar="PROJECT_ID",
                         help="GEE / GCP project ID (e.g. my-project-123)")
     parser.add_argument("--gcs-bucket", required=True, metavar="BUCKET",
-                        help="GCS bucket name used as staging area (e.g. my-chelsa-bucket)")
+                        help="GCS bucket name used as staging area "
+                             "(e.g. my-project-chelsa).  The bucket must already "
+                             "exist, or use --create-bucket to create it automatically.")
+    parser.add_argument("--create-bucket", action="store_true",
+                        help="Create the GCS bucket if it does not already exist.  "
+                             "The bucket is created in the US multi-region by default; "
+                             "override with --bucket-location.")
+    parser.add_argument("--bucket-location", default="US", metavar="LOCATION",
+                        help="GCS location for --create-bucket "
+                             "(default: US).  Examples: EU, us-central1, europe-west1.")
     parser.add_argument("--gee-base",   default=None, metavar="ASSET_PATH",
                         help="Root GEE asset folder path "
                              "(default: projects/<PROJECT_ID>/assets/chelsa_climatologies)")
@@ -285,6 +335,11 @@ def main():
     print(f"Connecting to {S3_ENDPOINT} …")
     s3   = make_s3()
     init_ee()
+
+    # Create the GCS bucket if requested (or if it is missing and we're not in dry-run).
+    if args.create_bucket and not args.dry_run and not args.skip_gcs:
+        ensure_gcs_bucket(location=args.bucket_location)
+
     tifs = list_tifs(s3, S3_PREFIX, period_filter, vars_filter)
     if args.limit:
         tifs = tifs[:args.limit]

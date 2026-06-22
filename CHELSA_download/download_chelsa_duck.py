@@ -1,29 +1,52 @@
 """
-Download a CHELSA dataset described by a Cyberduck (.duck) bookmark.
+Download CHELSA climatologies from a public S3 bucket.
 
-A .duck file is a plist (XML) describing an S3 connection. This script reads
-the bookmark, opens an anonymous S3 connection to the same endpoint/bucket/path,
-lists the objects underneath, and downloads them to a local directory while
-preserving the key structure.
+No Cyberduck / .duck file is required — the script ships with the correct
+CHELSA defaults (os.unil.cloud.switch.ch, anonymous access).  A .duck
+bookmark can still be supplied as an optional positional argument if you
+have one and want to override the defaults.
 
-Requirements
-------------
-    pip install boto3      # (already in the `gee` conda env)
+Setup (one-time)
+----------------
+1.  Install the only dependency::
+
+        pip install boto3
+
+    Or, if you are using the project's conda environment::
+
+        conda activate gee
+        pip install boto3
+
+2.  No account, credentials, or Cyberduck installation needed — CHELSA is
+    served from a public, anonymous S3 bucket.
+
+Obtaining a .duck file (optional)
+----------------------------------
+A .duck file is a Cyberduck / Mountain Duck bookmark that stores the S3
+connection details as a property-list (plist/XML).  You only need one if
+you want to point this script at a *different* S3 source.  To create one:
+
+* Download Cyberduck (https://cyberduck.io) and open a new connection to
+  the SWITCH S3 endpoint (https://os.unil.cloud.switch.ch), bucket
+  ``chelsa02``, path ``/chelsa02/chelsa/global/climatologies/``.
+* From the bookmark menu, choose *Export …* and save as ``envicloud.duck``.
 
 Usage
 -----
-    # List what is available (no download)
-    python download_chelsa_duck.py "C:/.../envicloud.duck" --dry-run
+    # List what is available — no download, uses built-in CHELSA defaults
+    python download_chelsa_duck.py --dry-run
 
-    # Download everything under the bookmark's path into ./CHELSA_download
-    python download_chelsa_duck.py "C:/.../envicloud.duck" -o ./CHELSA_download
+    # Download tas + pr for 1981-2010 into ./CHELSA_download
+    python download_chelsa_duck.py -o ./CHELSA_download --vars tas pr
+
+    # Same but with an explicit .duck bookmark
+    python download_chelsa_duck.py path/to/envicloud.duck -o ./CHELSA_download
 
     # Only the bio variables for the 1981-2010 period, 8 parallel workers
-    python download_chelsa_duck.py "C:/.../envicloud.duck" -o ./out \
-        --include bio 1981-2010 --workers 8
+    python download_chelsa_duck.py -o ./out --vars bio --workers 8
 
     # Just grab the first 3 files (handy smoke test)
-    python download_chelsa_duck.py "C:/.../envicloud.duck" -o ./out --limit 3
+    python download_chelsa_duck.py -o ./out --limit 3 --dry-run
 """
 
 from __future__ import annotations
@@ -38,6 +61,17 @@ import boto3
 from botocore import UNSIGNED
 from botocore.config import Config
 from botocore.exceptions import ClientError
+
+# ── CHELSA defaults (anonymous public S3) ──────────────────────────────────────
+# These are the known connection details for the public CHELSA climatologies
+# bucket on the SWITCH object store.  They are used when no .duck file is given.
+CHELSA_DEFAULTS = {
+    "endpoint":  "https://os.unil.cloud.switch.ch",
+    "bucket":    "chelsa02",
+    "prefix":    "chelsa/global/climatologies/",
+    "anonymous": True,
+    "nickname":  "CHELSA climatologies (built-in defaults)",
+}
 
 # SWITCH object-store endpoints to fall back to when the bookmark's own host
 # does not actually serve the bucket. The chelsa02 bucket currently lives on
@@ -178,10 +212,15 @@ def human_gb(n_bytes: int) -> str:
 
 
 def main() -> int:
-    p = argparse.ArgumentParser(description="Download a dataset from a Cyberduck .duck S3 bookmark")
-    p.add_argument("duck",
-                   help="Path to the .duck bookmark file (.duck files are created by "
-                        "Cyberduck / Mountain Duck and describe an S3 connection)")
+    p = argparse.ArgumentParser(
+        description="Download CHELSA climatologies from a public S3 bucket.",
+        epilog="No .duck file or account is needed — the built-in CHELSA defaults "
+               "connect anonymously to os.unil.cloud.switch.ch.",
+    )
+    p.add_argument("duck", nargs="?", default=None,
+                   help="Optional path to a Cyberduck .duck bookmark file.  "
+                        "When omitted, the built-in CHELSA S3 defaults are used "
+                        "(os.unil.cloud.switch.ch / chelsa02 / anonymous).")
     p.add_argument("-o", "--out", default="./CHELSA_download",
                    help="Output directory (default: ./CHELSA_download)")
     p.add_argument("--vars", nargs="+", default=[], metavar="VAR",
@@ -208,13 +247,17 @@ def main() -> int:
                    help="Skip the confirmation prompt before downloading")
     args = p.parse_args()
 
-    duck_path = Path(args.duck)
-    if not duck_path.exists():
-        print(f"Bookmark not found: {duck_path}", file=sys.stderr)
-        return 2
+    if args.duck is not None:
+        duck_path = Path(args.duck)
+        if not duck_path.exists():
+            print(f"Bookmark not found: {duck_path}", file=sys.stderr)
+            return 2
+        conn = parse_duck(duck_path)
+        print(f"Bookmark : {conn['nickname']} (from {duck_path})")
+    else:
+        conn = dict(CHELSA_DEFAULTS)  # copy so resolve_endpoint can mutate it
+        print("Bookmark : (none — using built-in CHELSA defaults)")
 
-    conn = parse_duck(duck_path)
-    print(f"Bookmark : {conn['nickname']}")
     print(f"Bucket   : {conn['bucket']}")
     print(f"Prefix   : {conn['prefix']}")
     print(f"Auth     : {'anonymous' if conn['anonymous'] else 'credentials required'}")
