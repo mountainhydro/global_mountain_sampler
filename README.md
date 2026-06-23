@@ -26,8 +26,8 @@ breadth of global mountain environments.
 | `notebooks/global_sampling.ipynb` | Stratified GEE sampling (50k) → k-means medoid reduction (1000) → GEE assets |
 | `notebooks/global_climate_space.ipynb` | Annual CHELSA climate → climate-space density plots + interactive explorer → image/polygon assets for the app |
 | `gee/global_sample_app.js` | Earth Engine App: global map of the 1000 medoids + GMBA regions + supersite basins, with on-the-fly climate-space density plots |
-| `ingest/download_chelsa_duck.py` | Download CHELSA v2.1 GeoTIFFs from SWITCH ScienceCloud S3 to a local directory |
-| `ingest/chelsa_to_gee.py` | Upload local CHELSA TIFs to GCS and ingest them as GEE Image assets |
+| `CHELSA_download/download_chelsa_duck.py` | Download CHELSA v2.1 GeoTIFFs from SWITCH ScienceCloud S3 to a local directory |
+| `CHELSA_download/chelsa_to_gee.py` | Upload local CHELSA TIFs to GCS and ingest them as GEE Image assets |
 
 ## Method
 
@@ -66,7 +66,7 @@ datasets need no setup; the others must exist in your project before running.
 | `GOOGLE/SATELLITE_EMBEDDING/V1/ANNUAL` (AlphaEarth) | `global_sampling` | Public GEE catalog — no setup |
 | `USGS/GMTED2010` (global DEM, Kapos classes) | `global_sampling` | Public GEE catalog — no setup |
 | `…/assets/GMBA_Inventory_standard_300` (mountain regions) | both notebooks + app | **Project asset** — ingest `GMBA_Inventory_v2.0_standard_300/*.shp` as a FeatureCollection table |
-| `…/assets/chelsa_climatologies/1981-2010/<var>/CHELSA_<var>_<MM>_1981-2010_V21` | `global_climate_space` | **Project assets** — 132 monthly CHELSA v2.1 rasters (11 variables × 12 months) ingested as images; use `ingest/download_chelsa_duck.py` + `ingest/chelsa_to_gee.py` (see *Ingesting CHELSA into GEE* below) |
+| `…/assets/chelsa_climatologies/1981-2010/<var>/CHELSA_<var>_<MM>_1981-2010_V21` | `global_climate_space` | **Project assets** — 132 monthly CHELSA v2.1 rasters (11 variables × 12 months) ingested as images; use `CHELSA_download/download_chelsa_duck.py` + `CHELSA_download/chelsa_to_gee.py` (see *Ingesting CHELSA into GEE* below) |
 | Supersite basin shapefiles (`Supersites/.../*.shp`) | `global_climate_space` §5 | **Local files** — paths set in the `SUPERSITES` config |
 
 Within the pipeline, `global_climate_space` and the app also consume assets that
@@ -102,83 +102,84 @@ monthly CHELSA climatologies are pre-existing assets in the same project.)
 
 ## Ingesting CHELSA into GEE
 
-The `ingest/` folder contains two standalone scripts for bringing the CHELSA v2.1
-climatologies into a GEE project. Run them **once**, before `global_climate_space.ipynb`.
+The `CHELSA_download/` folder contains two standalone scripts for bringing the
+CHELSA v2.1 climatologies into a GEE project. Run them **once**, before
+`global_climate_space.ipynb`.
 
-### 1 — Download CHELSA locally (`ingest/download_chelsa_duck.py`)
+### 1 — Download CHELSA locally (`CHELSA_download/download_chelsa_duck.py`)
 
 Downloads CHELSA GeoTIFFs from the SWITCH ScienceCloud S3 store to a local
-directory. The script reads a [Cyberduck](https://cyberduck.io/) `.duck` bookmark
-file to locate the bucket, so you need to create one first (see below).
-
-**Create a `.duck` bookmark:**
-Open Cyberduck → *Open Connection* → choose **S3 (Amazon S3)**, set:
-- Server: `os.unil.cloud.switch.ch`
-- Path: `/chelsa02/chelsa/global/climatologies/`
-- Access key ID / Secret: leave blank (anonymous)
-
-Save it as a `.duck` file (drag the connection to the desktop, or *Bookmark → New
-Bookmark*).
+directory. **No account, credentials, or extra tools are needed** — the script
+connects anonymously using built-in defaults.
 
 ```bash
-# Dry-run — list what would be downloaded (no files transferred)
-python ingest/download_chelsa_duck.py path/to/envicloud.duck --dry-run
+cd CHELSA_download
 
-# Download the 11-variable 1981-2010 climatologies (~15 GB) to ./ingest/CHELSA_download
-python ingest/download_chelsa_duck.py path/to/envicloud.duck \
-    -o ./ingest/CHELSA_download \
+# Dry-run — list what would be downloaded (no files transferred)
+python download_chelsa_duck.py --dry-run
+
+# Download the 11-variable 1981-2010 climatologies (~15 GB)
+python download_chelsa_duck.py \
     --vars clt cmi hurs pet pr rsds sfcWind tas tasmax tasmin vpd \
     --period 1981-2010
 
-# Smoke-test: grab just the first 3 files
-python ingest/download_chelsa_duck.py path/to/envicloud.duck --limit 3 -o ./ingest/CHELSA_download
+# Grab just the first 3 files (quick connectivity check)
+python download_chelsa_duck.py --limit 3 --dry-run
 ```
 
+Files land in `CHELSA_download/CHELSA_download/<var>/1981-2010/`.
 Available variables: `clt cmi hurs pet pr rsds sfcWind tas tasmax tasmin vpd`
 (and `bio` bioclimatic indices if you need them).
 
-### 2 — Upload to GCS and ingest into GEE (`ingest/chelsa_to_gee.py`)
+> **Optional `.duck` bookmark.** If you want to point the script at a different
+> S3 source, pass a [Cyberduck](https://cyberduck.io/) `.duck` bookmark as the
+> first positional argument: `python download_chelsa_duck.py path/to/my.duck`.
+
+### 2 — Upload to GCS and ingest into GEE (`CHELSA_download/chelsa_to_gee.py`)
 
 Streams each TIF from the CHELSA S3 bucket to a GCS staging bucket, then submits
-a GEE ingest task. Requires a GCS bucket you own and a GEE project with asset
-write access.
+a GEE ingest task. Requires a GCS bucket and a GEE project with asset write
+access.
 
 **Authentication** (one-time):
 ```bash
-earthengine authenticate          # GEE
-gcloud auth application-default login   # GCS (or let the script reuse EE credentials)
+gcloud auth application-default login   # GCS uploads
+earthengine authenticate                 # GEE ingestion
 ```
 
 ```bash
-# Dry-run — list what would be ingested
-python ingest/chelsa_to_gee.py \
+cd CHELSA_download
+
+# Dry-run — list what would be uploaded/ingested, create nothing
+python chelsa_to_gee.py \
     --project  my-gcp-project-id \
-    --gcs-bucket  my-chelsa-staging-bucket \
+    --gcs-bucket  my-chelsa-bucket \
     --dry-run
 
-# Ingest all 11 variables for 1981-2010 (the pipeline default)
-python ingest/chelsa_to_gee.py \
+# First run: let the script create the GCS bucket automatically, then ingest
+python chelsa_to_gee.py \
     --project  my-gcp-project-id \
-    --gcs-bucket  my-chelsa-staging-bucket \
+    --gcs-bucket  my-chelsa-bucket \
+    --create-bucket \
     --period 1981-2010
 
 # Custom GEE asset root (default: projects/<PROJECT>/assets/chelsa_climatologies)
-python ingest/chelsa_to_gee.py \
+python chelsa_to_gee.py \
     --project  my-gcp-project-id \
-    --gcs-bucket  my-chelsa-staging-bucket \
+    --gcs-bucket  my-chelsa-bucket \
     --gee-base projects/my-gcp-project-id/assets/my_chelsa_folder \
     --period 1981-2010
 
-# Skip the GCS upload if files are already staged
-python ingest/chelsa_to_gee.py \
+# Skip the GCS upload if the TIFs are already staged there
+python chelsa_to_gee.py \
     --project  my-gcp-project-id \
-    --gcs-bucket  my-chelsa-staging-bucket \
+    --gcs-bucket  my-chelsa-bucket \
     --skip-gcs
 
 # Non-interactive (CI / batch)
-python ingest/chelsa_to_gee.py \
+python chelsa_to_gee.py \
     --project  my-gcp-project-id \
-    --gcs-bucket  my-chelsa-staging-bucket \
+    --gcs-bucket  my-chelsa-bucket \
     --yes
 ```
 
@@ -189,10 +190,12 @@ The `global_climate_space.ipynb` notebook expects this exact path structure.
 ## Repository layout
 
 ```
-notebooks/      global_sampling.ipynb, global_climate_space.ipynb
-gee/            global_sample_app.js
-data/           pipeline inputs/outputs (CSVs, rendered plots, explorer HTML)
+notebooks/          global_sampling.ipynb, global_climate_space.ipynb
+gee/                global_sample_app.js
+data/               pipeline inputs/outputs (CSVs, rendered plots, explorer HTML)
+CHELSA_download/    scripts to download CHELSA and ingest into GEE;
+                    downloaded TIFs live in CHELSA_download/CHELSA_download/
 GMBA_Inventory_v2.0_standard_300/   GMBA shapefile (source of the GEE table asset)
-alternatives/   superseded earlier pipeline (old notebooks, region app, helper
-                package, the standalone plot-render script, old outputs)
+alternatives/       superseded earlier pipeline (old notebooks, region app, helper
+                    package, the standalone plot-render script, old outputs)
 ```
